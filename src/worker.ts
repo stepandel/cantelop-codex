@@ -30,18 +30,15 @@ export async function handle(root: string, command: Command, messageId: string, 
     const count = await backfillSessions(root, database, signal);
     return { type: "configured", messageId, data: { indexedSessions: count } };
   }
-  return handleCommand(root, command, messageId, env, signal, deps, emit);
-}
-async function handleCommand(root: string, command: Exclude<Command, { type: "reindex" | "cancel" }>, messageId: string, env: Env, signal: AbortSignal, deps: Dependencies, emit: (event: Event) => Promise<void>): Promise<Event> {
+  signal.throwIfAborted();
   const state = path.join(root, ".agent-api");
   const sessionFile = (id: string) => path.join(state, "sessions", `${sessionId(id)}.json`);
-  const rulesFile = path.join(state, "issue-rules.json"); // Legacy read fallback.
   const ruleFile = (repo: string) => path.join(state, "issue-rules", `${repo}.json`);
   const event = (type: Event["type"], data?: unknown, id?: string): Event => ({ type, messageId, sessionId: id, data });
   if (command.type === "inspect") return event("session", await readJSON(sessionFile(command.sessionId)) ?? null, command.sessionId);
   if (command.type === "rule") {
     repository(command.repository, env.GITHUB_REPOSITORIES);
-    await saveJSON(ruleFile(command.repository), { model: model(command.model) });
+    await saveJSON(ruleFile(command.repository), model(command.model));
     return event("configured", { repository: command.repository, model: command.model });
   }
   // Persist an admission marker BEFORE side effects. Ambiguous interrupted work is
@@ -55,8 +52,7 @@ async function handleCommand(root: string, command: Exclude<Command, { type: "re
   if (command.type === "issue") {
     if (!["OWNER", "MEMBER", "COLLABORATOR"].includes(command.issue.association)) return event("ignored", { reason: "Untrusted author" });
     const repo = repository(command.issue.repository, env.GITHUB_REPOSITORIES);
-    const selected = (await readJSON<{ model: Model }>(ruleFile(repo)))?.model
-      ?? (await readJSON<Record<string, Model>>(rulesFile))?.[repo] ?? env.GITHUB_ISSUE_MODEL;
+    const selected = await readJSON<Model>(ruleFile(repo)) ?? env.GITHUB_ISSUE_MODEL;
     if (!selected) return event("ignored", { reason: "Set GITHUB_ISSUE_MODEL or configure a repository issue rule first" });
     spec = {
       sessionId: await issueSessionId(command.issue.repository, command.issue.number),

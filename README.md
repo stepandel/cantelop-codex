@@ -5,7 +5,7 @@ console, GitHub repository tasks, streamed progress, persistent conversations,
 queued follow-ups, steering, cancellation, and optional API-readable session state.
 
 Adapted from [cantelop-agents-api-example](https://github.com/stepandel/cantelop-agents-api-example)
-at commit `363673b0a76cec9fdda1adf4c8f57e49c6641e61`. The API, console and scheduling
+at commit `a0a46a9c3356dee276ee7562cb12ded168e7c32c`. The API, console and scheduling
 follow that example, with Codex as the runtime and an OpenAI API key for model access.
 The pinned Codex TypeScript SDK and CLI are both `0.146.1`.
 
@@ -75,8 +75,8 @@ curl -N --fail-with-body "$BASE_URL$(printf '%s' "$request" | jq -r .stream)" \
 ```
 
 HTTP 202 means dispatch succeeded, not that the turn completed. The response
-includes `sessionId`, `messageId`, a turn-specific `stream` URL and a session-wide
-`events` URL. A turn stream closes on its terminal application event. Disconnecting
+includes `sessionId`, `messageId`, and a turn-specific `stream` URL. A turn stream
+closes on its terminal application event. Session-wide subscriptions are not exposed. Disconnecting
 does not cancel work. Reconnect with `Last-Event-ID` within Cantelop's retention
 window, and deduplicate using event IDs.
 
@@ -101,7 +101,6 @@ stream for the result. Inspection includes the latest snapshot and durable inbox
 | `POST /sessions/messages` | Follow up with `{sessionId, prompt, mode?}`. |
 | `POST /sessions/cancel` | Cancel active work with `{sessionId}`. |
 | `POST /sessions/inspect` | Inspect through the runtime using `{sessionId}`. |
-| `GET /events?sessionId=…` | Session-wide Cantelop stream. |
 | `GET /turns/events?sessionId=…&messageId=…` | Filtered SSE for one request. |
 | `GET /sessions` | Database session list; supports repository, status, limit and cursor. |
 | `GET /sessions/inspect?sessionId=…` | Database snapshot without waking runtime. |
@@ -144,7 +143,8 @@ original prompts. There is no automatic retention policy.
 Database session writes are required when configured: a failed write can fail the
 turn. Workspace snapshots remain available for repair; turn indexing logs failures
 and is best effort. POST `/sessions/reindex` to backfill session snapshots after an
-outage. It does not rebuild all historical turn records. For a local workspace,
+outage. It does not rebuild all historical turn records. Turn recovery reads only
+`agent_turns`; session snapshots do not substitute for missing turn records. For a local workspace,
 `npm run db:setup -- /absolute/workspace/path` also backfills snapshots.
 
 ## GitHub issue automation
@@ -208,9 +208,10 @@ the old version before upgrading. If an old session branch is still checked out
 in the shared clone, preserve/commit its edits and switch that clone to another
 branch before resuming the session; Git otherwise refuses to attach that branch
 to a new worktree. No edits are automatically reset or moved. Existing Codex thread
-IDs remain usable. Legacy `issue-rules.json` remains a read fallback.
+IDs remain usable. Only per-repository issue-rule files are read.
 
 Backfill reads atomic snapshots without rewriting them or blocking agent work.
+Snapshots must contain their original creation and update timestamps.
 A sudden process kill can still prevent a final event or database update.
 
 This is a single trusted-operator service. The API token accesses every session,
@@ -227,6 +228,22 @@ The API now requires `repository` and `model` on session creation and accepts
 `sessionId` in JSON bodies for follow-ups, inspection and cancellation. The old
 `.codex-host/` snapshots are not migrated; start new sessions with this version.
 `CODEX_MODEL` is replaced by per-session `model` and `GITHUB_ISSUE_MODEL`.
+
+## Reference cleanup compatibility
+
+Dispatch responses expose only `stream`; the `events` field and `/events` endpoint
+are removed. Use the returned turn stream for each request.
+
+Repository rules are now JSON model strings in
+`.agent-api/issue-rules/OWNER/REPO.json`, matching the reference. Reapply rules through
+`PUT /github/issue-rules` or the console if they were saved in `issue-rules.json` or
+as `{ "model": "…" }` objects by an earlier version. Existing sessions keep their
+saved model.
+
+Agent replies are recognized only by `<!-- cantelop-agent-reply -->`. Unmarked
+comments are treated as ordinary comments. Console snapshots require turn IDs;
+old cached summaries without IDs are not upgraded automatically. Reindexing
+requires saved timestamps, and turn recovery requires per-turn database records.
 
 ## Development
 

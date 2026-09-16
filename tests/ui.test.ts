@@ -73,3 +73,16 @@ test("expired replay polls only the requested turn through waiting to completion
   assert.deepEqual(events.map(e => e.type), ['status', 'completed']);
   assert.ok(calls.slice(1).every(url => url === '/turns/inspect?sessionId=one&messageId=second'));
 });
+
+test("repeated snapshots update only the matching turn without duplication", () => {
+  const h = harness();
+  const session: any = { id: "issue-1", turns: [] };
+  const first = { messageId: "first", prompt: "First", status: "completed", response: "First result" };
+  const second = { messageId: "second", prompt: "Second", status: "running" };
+  h.applySnapshot(session, first);
+  h.applySnapshot(session, second);
+  h.applySnapshot(session, { ...second, status: "completed", response: "Second result" });
+  assert.equal(session.turns.length, 2);
+  assert.equal(session.turns[0].response, "First result");
+  assert.equal(session.turns[1].response, "Second result");
+});

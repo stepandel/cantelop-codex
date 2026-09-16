@@ -244,7 +244,7 @@ test("concurrent issue rule updates for different repositories are preserved", a
   const rulesEnv = { ...env, GITHUB_REPOSITORIES: "owner/one,owner/two" };
   await Promise.all(["one", "two"].map(repo => handle(h.root,
     { type: "rule", repository: `owner/${repo}`, model: `model-${repo}` }, repo, rulesEnv, new AbortController().signal, h.deps)));
-  for (const repo of ["one", "two"]) assert.deepEqual(await readJSON(path.join(h.root, ".agent-api", "issue-rules", "owner", `${repo}.json`)), { model: `model-${repo}` });
+  for (const repo of ["one", "two"]) assert.equal(await readJSON(path.join(h.root, ".agent-api", "issue-rules", "owner", `${repo}.json`)), `model-${repo}`);
 });
 
 test("concurrent initial checkouts publish one clone and preserve independent worktrees", async t => {
@@ -268,4 +268,16 @@ test("concurrent initial checkouts publish one clone and preserve independent wo
   assert.equal(await checkout(h.root, "owner/repo", "one", cloneEnv, signal), one);
   assert.equal(await readFile(path.join(one!, "file.txt"), "utf8"), "unfinished session one");
   assert.deepEqual(await readdir(path.join(h.root, "repositories", "owner")), ["repo"]);
+});
+
+test("legacy aggregate issue rules are ignored and only marked replies are filtered", async t => {
+  const h = await harness(t);
+  const { saveJSON } = await import("../src/runtime.js");
+  const { isAgentReply, issueReplyMarker } = await import("../src/contracts.js");
+  await saveJSON(path.join(h.root, ".agent-api", "issue-rules.json"), { "owner/repo": model });
+  const result = await h.run({ type: "issue", deliveryId: "legacy-rule", issue: { repository: "owner/repo", number: 101, title: "Fix", body: "Fix", association: "OWNER" } }, "legacy-rule");
+  assert.equal(result.type, "ignored");
+  assert.equal(h.runs.length, 0);
+  assert.equal(isAgentReply("Cantelop session `example`\nOrdinary comment"), false);
+  assert.equal(isAgentReply(`${issueReplyMarker}\nAgent reply`), true);
 });

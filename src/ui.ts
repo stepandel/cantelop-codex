@@ -324,7 +324,7 @@ dialog::backdrop { background: rgba(20, 18, 14, .45); backdrop-filter: blur(2px)
     <section class="view active" id="view-new">
       <div class="center">
         <h2 class="page-title">Start a session</h2>
-        <p class="lede">The agent clones the repository, works on an agent branch, and streams progress here. Commands are accepted immediately; the turn itself can take minutes.</p>
+        <p class="lede">The agent clones the repository, works in its own Git worktree, and streams progress here. Commands are accepted immediately; the turn itself can take minutes.</p>
         <form id="create-form" class="form">
           <div class="row">
             <div class="field"><label for="repository">Repository</label><input id="repository" placeholder="owner/repo" required autocomplete="off" spellcheck="false"></div>
@@ -539,7 +539,7 @@ dialog::backdrop { background: rgba(20, 18, 14, .45); backdrop-filter: blur(2px)
         if (turn.result) { onEvent(turn.result); return; }
         if (turn.progress) onEvent(turn.progress);
       } else if (res.status !== 404) throw new Error('Saved turn state unavailable (HTTP ' + res.status + ')');
-      // A 404 can be admission/index lag, or a worker that has not indexed its turn yet.
+      // A 404 can be admission or index lag.
       // Do not mistake the previous turn's completed snapshot for this turn.
       await new Promise(function (resolve) { setTimeout(resolve, 3000); });
     }
@@ -679,13 +679,13 @@ dialog::backdrop { background: rgba(20, 18, 14, .45); backdrop-filter: blur(2px)
     }
   }
   function applySnapshot(s, d) {
-    if (!d || !d.messageId) return false;
+    if (!d) return false;
     var changed = false;
     if (d.repository && s.repository !== d.repository) { s.repository = d.repository; changed = true; }
     if (d.model && s.model !== d.model) { s.model = d.model; changed = true; }
     if (d.createdAt && s.createdAt !== d.createdAt) { s.createdAt = d.createdAt; changed = true; }
     var target = s.turns.find(function (t) { return t.messageId === d.messageId; });
-    if (!target && d.prompt) {
+    if (!target && d.messageId && d.prompt) {
       target = { messageId: d.messageId, prompt: d.requestPrompt || d.prompt, status: 'running', phase: 'elsewhere', blocks: [], tools: [] };
       s.turns.push(target); changed = true;
     }

@@ -57,7 +57,7 @@ export const createApi = (databaseFactory = sessionDatabase) => defineApi<Comman
       : command.type === "rule" || command.type === "reindex" ? `${command.type}-${crypto.randomUUID()}` : command.sessionId;
     const message = await worker(id).dispatch(command);
     console.info(JSON.stringify({ component: "agent-api", event: "session.dispatched", command: command.type, sessionId: id, messageId: message.id }));
-    return Response.json({ messageId: message.id, state: "accepted", sessionId: id, events: `/events?sessionId=${encodeURIComponent(id)}`, stream: `/turns/events?sessionId=${encodeURIComponent(id)}&messageId=${encodeURIComponent(message.id)}` }, { status: 202 });
+    return Response.json({ messageId: message.id, state: "accepted", sessionId: id, stream: `/turns/events?sessionId=${encodeURIComponent(id)}&messageId=${encodeURIComponent(message.id)}` }, { status: 202 });
   }
   function route(method: "GET" | "POST" | "PUT", path: string, auth: boolean, handler: (request: Request, context: RequestLog) => Promise<Response>) {
     router.route(method, path, async ({ request }) => {
@@ -89,7 +89,6 @@ export const createApi = (databaseFactory = sessionDatabase) => defineApi<Comman
   // Static operator console; it holds no secrets and calls this same origin with the operator's token.
   route("GET", "/", false, async () => new Response(ui, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
     "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" } }));
-  route("GET", "/events", true, request => worker(sessionId(new URL(request.url).searchParams.get("sessionId"))).events(request));
   route("GET", "/turns/events", true, async request => {
     if (request.headers.get("upgrade")) throw new TypeError("Turn streams require SSE");
     const url = new URL(request.url);
@@ -120,18 +119,7 @@ export const createApi = (databaseFactory = sessionDatabase) => defineApi<Comman
     const id = sessionId(params.get("sessionId"));
     const messageId = text(params.get("messageId"), "messageId", 100);
     if (!/^msg_[a-f0-9]{32}$/.test(messageId)) throw new TypeError("Invalid messageId");
-    const turn = await readDatabase(async db => {
-      const stored = await db.getTurn(id, messageId);
-      if (stored?.state === "finished") return stored;
-      // Recover the current turn from its session snapshot if turn indexing failed.
-      const session = await db.get(id);
-      if (session?.messageId !== messageId) return stored;
-      if (stored && session.status === "running") return stored;
-      return { sessionId: id, messageId, state: session.status === "running" ? "running" : "finished",
-        progress: { type: "status", messageId, data: session.runtimeStatus ?? { phase: "working" } },
-        ...(session.status === "running" ? {} : { result: { type: session.status, messageId,
-          data: { response: session.response, diagnostic: session.diagnostic, branch: "agent/" + id } } }) };
-    });
+    const turn = await readDatabase(db => db.getTurn(id, messageId));
     return turn ? queryResponse({ turn }) : queryResponse({ error: "Turn not indexed yet" }, 404);
   });
   route("GET", "/sessions/inspect", true, async request => {
