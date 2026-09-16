@@ -9,3 +9,4 @@ dist/
 .DS_Store
 .agent-api/
 repositories/
+worktrees/

@@ -183,10 +183,16 @@ stop the upload. `.env` is not automatically uploaded by deployment.
 ## Runtime and recovery
 
 Each API session has its own Cantelop actor and durable inbox (up to 100 pending
-messages). Actors share one Workspace. A workspace-wide lock serializes coding
-turns and repository rule changes, matching the published reference example.
-Each repository has one clone at `repositories/OWNER/REPO`; sessions use branches
-`agent/SESSION_ID`. Switching sessions refuses to discard unfinished changes.
+messages). Actors share one Workspace and run concurrently. Each actor still
+orders its own turns. There is no application-wide workspace lock.
+
+Repositories have a shared clone at `repositories/OWNER/REPO`, with separate
+working trees at `worktrees/OWNER/REPO/SESSION_ID` on `agent/SESSION_ID` branches.
+Follow-ups reuse their worktree, including unfinished edits. New session branches
+fetch the remote default HEAD into a session-specific ref. Concurrent initial
+clones publish one complete clone and discard redundant temporary clones.
+Issue rules are saved per repository to avoid lost updates across repositories.
+
 Agent instructions request commits before finishing. Commits and pushes should
 still be checked in GitHub; a successful model turn does not prove a push occurred.
 
@@ -197,10 +203,15 @@ files persist. Active turns time out after 30 minutes. Queued messages survive
 restart and are drained when another work request arrives. Previously running
 messages are marked interrupted and are not automatically replayed.
 
-The lock is never automatically stolen. Abrupt runtime death may leave
-`.agent-api/workspace.lock`; verify no owner is still running before removing it.
-Inspection stays available without acquiring the coding lock. A sudden process
-kill can prevent a final event or database update.
+Legacy `.agent-api/workspace.lock` directories are ignored. Stop workers running
+the old version before upgrading. If an old session branch is still checked out
+in the shared clone, preserve/commit its edits and switch that clone to another
+branch before resuming the session; Git otherwise refuses to attach that branch
+to a new worktree. No edits are automatically reset or moved. Existing Codex thread
+IDs remain usable. Legacy `issue-rules.json` remains a read fallback.
+
+Backfill reads atomic snapshots without rewriting them or blocking agent work.
+A sudden process kill can still prevent a final event or database update.
 
 This is a single trusted-operator service. The API token accesses every session,
 and repository allowlisting does not isolate shell commands or files. To match
@@ -225,7 +236,7 @@ npm run build
 ```
 
 Tests cover API authentication, webhook verification, queue/steering/cancellation,
-workspace locking, SQL persistence/recovery, console behavior, SSE transport and
+concurrent worktree isolation, SQL persistence/recovery, console behavior, SSE transport and
 the actual Codex SDK boundary with a fake CLI. They do not contact live OpenAI or
 GitHub services. Docker and authenticated live runs are separate deployment checks.
 

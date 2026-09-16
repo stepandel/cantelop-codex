@@ -539,7 +539,7 @@ dialog::backdrop { background: rgba(20, 18, 14, .45); backdrop-filter: blur(2px)
         if (turn.result) { onEvent(turn.result); return; }
         if (turn.progress) onEvent(turn.progress);
       } else if (res.status !== 404) throw new Error('Saved turn state unavailable (HTTP ' + res.status + ')');
-      // A 404 can be admission/index lag, or an older worker awaiting its lock.
+      // A 404 can be admission/index lag, or a worker that has not indexed its turn yet.
       // Do not mistake the previous turn's completed snapshot for this turn.
       await new Promise(function (resolve) { setTimeout(resolve, 3000); });
     }
@@ -775,7 +775,7 @@ dialog::backdrop { background: rgba(20, 18, 14, .45); backdrop-filter: blur(2px)
       if (t.phase === 'codex_retry') return 'Model request retrying' + (runtime.attempt !== undefined ? ' (attempt ' + runtime.attempt + ')' : '');
       if (t.phase === 'codex_error') return 'Codex reported an error' + (runtime.code ? ': ' + runtime.code : '') + (runtime.statusCode ? ' (HTTP ' + runtime.statusCode + ')' : '') + '; waiting for turn outcome';
       if (!t.phase) return 'Dispatched — waiting for the session to start';
-      return { validate_model: 'Checking model availability', create_session: 'Opening the Codex conversation', waiting_for_model: 'Waiting for the model response', codex_busy: 'Codex is working', codex_idle: 'Codex is idle; waiting for turn outcome', codex_reasoning: 'Model is reasoning', started: 'Session started', waiting_for_workspace: 'Waiting for the shared workspace lock', checkout: 'Checking out the repository', agent_starting: 'Starting the agent', working: 'Agent is working', elsewhere: 'Agent is running; started outside this tab, so progress is refreshed from the session index' }[t.phase] || t.phase;
+      return { validate_model: 'Checking model availability', create_session: 'Opening the Codex conversation', waiting_for_model: 'Waiting for the model response', codex_busy: 'Codex is working', codex_idle: 'Codex is idle; waiting for turn outcome', codex_reasoning: 'Model is reasoning', started: 'Session started', checkout: 'Checking out the repository', agent_starting: 'Starting the agent', working: 'Agent is working', elsewhere: 'Agent is running; started outside this tab, so progress is refreshed from the session index' }[t.phase] || t.phase;
     }
     if (t.status === 'disconnected') return 'Stream interrupted. The agent may still be running.';
     var took = t.finishedAt && t.startedAt ? ' in ' + Math.max(1, Math.round((t.finishedAt - t.startedAt) / 1000)) + 's' : '';

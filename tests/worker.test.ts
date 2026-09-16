@@ -110,23 +110,11 @@ test("API and webhook secrets are absent from agent subprocess environment", () 
   assert.equal(actual.OPENAI_API_KEY, undefined);
   assert.equal(actual.CODEX_API_KEY, "test-openai");
 });
-test("shared checkout refuses switching branches when changes remain", async t => {
-  const h = await harness(t);
-  const { mkdir, writeFile } = await import("node:fs/promises");
-  const directory = path.join(h.root, "repositories", "owner", "repo");
-  await mkdir(directory, { recursive: true });
-  const gitEnv = agentEnvironment(h.root, env);
-  const signal = new AbortController().signal;
-  await git(directory, ["init", "-b", "agent/one"], gitEnv, signal);
-  await writeFile(path.join(directory, "work.txt"), "unfinished");
-  assert.equal(await checkout(h.root, "owner/repo", "one", gitEnv, signal), directory);
-  await assert.rejects(checkout(h.root, "owner/repo", "two", gitEnv, signal), /uncommitted changes/);
-});
 test("OpenAI key is required even when another provider key exists", () => {
   assert.throws(() => agentEnvironment("/workspace", { GITHUB_TOKEN: "test", OPENAI_API_KEY: "unused" }), /OpenAI credentials/);
 });
 
-test("inspection remains available during work; cancellation persists failure and releases the lock", async t => {
+test("inspection remains available during work; cancellation persists failure", async t => {
   const h = await harness(t);
   const controller = new AbortController();
   let started!: () => void;
@@ -227,4 +215,54 @@ test("runtime status and tool activity are inspectable before the turn finishes"
     return "Done";
   };
   await h.run({ type: "create", spec: { sessionId: "live", model, repository: "owner/repo", prompt: "Start" } }, "m1");
+});
+
+test("sessions run concurrently even when a legacy workspace lock exists", async t => {
+  const h = await harness(t);
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(path.join(h.root, ".agent-api", "workspace.lock"), { recursive: true });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  t.after(release);
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  h.deps.runAgent = async options => { if (options.prompt === "hold") { started(); await gate; } return "done"; };
+  const first = h.run({ type: "create", spec: { sessionId: "one", repository: "owner/repo", model, prompt: "hold" } }, "parallel-1");
+  await ready;
+  try {
+    const second = await handle(h.root, { type: "create", spec: { sessionId: "two", repository: "owner/repo", model, prompt: "second" } }, "parallel-2", env, AbortSignal.timeout(1000), h.deps);
+    assert.equal(second.type, "completed");
+  } finally { release(); await first; }
+});
+
+test("concurrent issue rule updates for different repositories are preserved", async t => {
+  const h = await harness(t);
+  const { readJSON } = await import("../src/runtime.js");
+  const rulesEnv = { ...env, GITHUB_REPOSITORIES: "owner/one,owner/two" };
+  await Promise.all(["one", "two"].map(repo => handle(h.root,
+    { type: "rule", repository: `owner/${repo}`, model: `model-${repo}` }, repo, rulesEnv, new AbortController().signal, h.deps)));
+  for (const repo of ["one", "two"]) assert.deepEqual(await readJSON(path.join(h.root, ".agent-api", "issue-rules", "owner", `${repo}.json`)), { model: `model-${repo}` });
+});
+
+test("concurrent initial checkouts publish one clone and preserve independent worktrees", async t => {
+  const h = await harness(t);
+  const { mkdir, writeFile, readFile, readdir } = await import("node:fs/promises");
+  const remote = path.join(h.root, "origin");
+  await mkdir(remote);
+  const gitEnv = agentEnvironment(h.root, env);
+  const signal = AbortSignal.timeout(15000);
+  await git(remote, ["init", "-b", "main"], gitEnv, signal);
+  await writeFile(path.join(remote, "file.txt"), "base");
+  await git(remote, ["add", "."], gitEnv, signal);
+  await git(remote, ["commit", "-m", "initial"], gitEnv, signal);
+  const cloneEnv = { ...gitEnv, GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_1: `url.${remote}.insteadOf`, GIT_CONFIG_VALUE_1: "https://github.com/owner/repo.git" };
+  const [one, two] = await Promise.all(["one", "two"].map(id => checkout(h.root, "owner/repo", id, cloneEnv, signal)));
+  assert.notEqual(one, two);
+  assert.equal(await git(one!, ["branch", "--show-current"], gitEnv, signal), "agent/one");
+  assert.equal(await git(two!, ["branch", "--show-current"], gitEnv, signal), "agent/two");
+  await writeFile(path.join(one!, "file.txt"), "unfinished session one");
+  assert.equal(await readFile(path.join(two!, "file.txt"), "utf8"), "base");
+  assert.equal(await checkout(h.root, "owner/repo", "one", cloneEnv, signal), one);
+  assert.equal(await readFile(path.join(one!, "file.txt"), "utf8"), "unfinished session one");
+  assert.deepEqual(await readdir(path.join(h.root, "repositories", "owner")), ["repo"]);
 });

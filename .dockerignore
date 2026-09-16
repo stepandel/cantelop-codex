@@ -7,3 +7,4 @@ node_modules
 .codex-host
 .agent-api
 repositories
+worktrees/
