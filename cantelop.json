@@ -4,8 +4,13 @@
   "session": { "entrypoint": "src/session.ts", "dockerfile": "docker/Dockerfile" },
   "environment": {
     "API_TOKEN": { "secret": true, "required": true },
-    "CODEX_API_KEY": { "secret": true, "required": true },
-    "CODEX_MODEL": {},
-    "WORKSPACE_SLUG": { "default": "codex" }
+    "GITHUB_TOKEN": { "secret": true, "required": true },
+    "GITHUB_WEBHOOK_SECRET": { "secret": true, "required": true },
+    "GITHUB_REPOSITORIES": { "required": true },
+    "GITHUB_ISSUE_MODEL": { "default": "gpt-5.6-terra" },
+    "WORKSPACE_SLUG": { "default": "codex" },
+    "SESSION_DATABASE_URL": {},
+    "SESSION_DATABASE_AUTH_TOKEN": { "secret": true },
+    "CODEX_API_KEY": { "secret": true, "required": true }
   }
 }

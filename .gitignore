@@ -7,3 +7,5 @@ node_modules/
 .codex-host/
 dist/
 .DS_Store
+.agent-api/
+repositories/
