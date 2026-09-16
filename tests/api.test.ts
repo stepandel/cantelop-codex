@@ -108,9 +108,9 @@ test("issue redeliveries route to the same issue actor", async () => {
   assert.equal(first.events, `/events?sessionId=${first.sessionId}`);
   assert.deepEqual(h.opens[0], h.opens[1]);
 });
-test("rejects provider objects for sessions and issue rules", async () => {
+test("requires model IDs to be nonempty strings", async () => {
   const h = harness();
-  for (const value of [{ providerID: "anthropic", modelID: "chosen" }, { providerID: "openrouter", modelID: "chosen" }, "", null]) {
+  for (const value of [{ model: "chosen" }, ["chosen"], 42, "", null]) {
     assert.equal((await h.request("/sessions", { repository: "owner/repo", prompt: "Fix", model: value })).status, 400);
     assert.equal((await h.request("/github/issue-rules", { repository: "owner/repo", model: value }, { authorization: "Bearer api-secret" }, "PUT")).status, 400);
   }

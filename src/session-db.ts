@@ -7,7 +7,7 @@ export interface StoredSession extends SessionSpec {
   codexThreadId?: string;
   /** Current turn identity for attaching clients that did not dispatch it. */
   messageId?: string;
-  runtimeStatus?: { phase: string; attempt?: number; next?: number; code?: string; statusCode?: number };
+  runtimeStatus?: { phase: string };
   lastProgressAt?: string;
   tools?: { partId: string; tool: string; status: string }[];
   status: "running" | "completed" | "failed";

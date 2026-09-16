@@ -123,7 +123,7 @@ export const createApi = (databaseFactory = sessionDatabase) => defineApi<Comman
     const turn = await readDatabase(async db => {
       const stored = await db.getTurn(id, messageId);
       if (stored?.state === "finished") return stored;
-      // Compatible with workers started before per-turn indexing was deployed.
+      // Recover the current turn from its session snapshot if turn indexing failed.
       const session = await db.get(id);
       if (session?.messageId !== messageId) return stored;
       if (stored && session.status === "running") return stored;

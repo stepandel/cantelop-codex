@@ -109,6 +109,9 @@ test("API and webhook secrets are absent from agent subprocess environment", () 
   assert.equal(actual.ANTHROPIC_API_KEY, undefined);
   assert.equal(actual.OPENAI_API_KEY, undefined);
   assert.equal(actual.CODEX_API_KEY, "test-openai");
+  assert.equal(actual.CODEX_HOME, "/workspace/.agent-api/codex");
+  assert.equal(actual.XDG_DATA_HOME, undefined);
+  assert.equal(actual.XDG_CONFIG_HOME, undefined);
 });
 test("OpenAI key is required even when another provider key exists", () => {
   assert.throws(() => agentEnvironment("/workspace", { GITHUB_TOKEN: "test", OPENAI_API_KEY: "unused" }), /OpenAI credentials/);
@@ -142,7 +145,7 @@ test("inspection remains available during work; cancellation persists failure", 
 for (const override of [false, true]) {
   test(`issue uses ${override ? "repository override" : "default model"} and preserves it for follow-ups`, async t => {
     const h = await harness(t);
-    const fallback = "openai/gpt-4.1";
+    const fallback = "gpt-5.6-sol";
     if (override) await h.run({ type: "rule", repository: "owner/repo", model }, "rule");
     const issue: Command = { type: "issue", deliveryId: "default-delivery", issue: { repository: "owner/repo", number: 8, title: "Bug", body: "Fix", association: "OWNER" } };
     const result = await handle(h.root, issue, "issue", { ...env, GITHUB_ISSUE_MODEL: fallback }, new AbortController().signal, h.deps);
@@ -156,7 +159,7 @@ for (const override of [false, true]) {
 test("model failure gives actionable UI feedback and persists safe diagnostics", async t => {
   const h = await harness(t);
   const { AgentError } = await import("../src/runtime.js");
-  h.deps.runAgent = async () => { throw new AgentError({ code: "codex_failed", phase: "validate_model", stderrHints: [], reason: "model_not_found" }); };
+  h.deps.runAgent = async () => { throw new AgentError({ code: "codex_failed", phase: "prompt", reason: "model_not_found" }); };
   const result = await h.run({ type: "create", spec: { sessionId: "bad-model", repository: "owner/repo", model: "unavailable-model", prompt: "Hello" } }, "bad-model-1");
   assert.equal(result.type, "failed");
   assert.match((result.data as { error: string }).error, /Start a new session.*model ID/);
@@ -180,7 +183,7 @@ test("webhook and API turns persist stream identity and tool summaries", async t
   const h = await harness(t);
   h.deps.runAgent = async options => {
     for (const status of ["running", "completed"]) await options.onProgress?.({
-      type: "tool.status", data: { partId: "tool-1", tool: "bash", status, input: "not persisted" },
+      type: "tool.status", data: { partId: "tool-1", tool: "command_execution", status, input: "not persisted" },
     });
     return "Done";
   };
@@ -193,7 +196,7 @@ test("webhook and API turns persist stream identity and tool summaries", async t
     const result = await h.run(command, `message-${i}`);
     const snapshot = (await h.run({ type: "inspect", sessionId: result.sessionId! }, "inspect")).data as import("../src/session-db.js").StoredSession;
     assert.equal(snapshot.messageId, `message-${i}`);
-    assert.deepEqual(snapshot.tools, [{ partId: "tool-1", tool: "bash", status: "completed" }]);
+    assert.deepEqual(snapshot.tools, [{ partId: "tool-1", tool: "command_execution", status: "completed" }]);
     await h.run({ type: "prompt", sessionId: result.sessionId!, prompt: "Continue" }, `followup-${i}`);
     const next = (await h.run({ type: "inspect", sessionId: result.sessionId! }, "inspect")).data as import("../src/session-db.js").StoredSession;
     assert.equal(next.messageId, `followup-${i}`);
@@ -204,12 +207,12 @@ test("webhook and API turns persist stream identity and tool summaries", async t
 test("runtime status and tool activity are inspectable before the turn finishes", async t => {
   const h = await harness(t);
   h.deps.runAgent = async options => {
-    await options.onProgress!({ type: "status", data: { phase: "codex_retry", attempt: 2 } });
-    await options.onProgress!({ type: "tool.status", data: { partId: "p", tool: "read", status: "running" } });
+    await options.onProgress!({ type: "status", data: { phase: "codex_busy" } });
+    await options.onProgress!({ type: "tool.status", data: { partId: "p", tool: "command_execution", status: "running" } });
     const result = await h.run({ type: "inspect", sessionId: "live" }, "inspect");
     const stored = result.data as any;
     assert.equal(stored.status, "running");
-    assert.deepEqual(stored.runtimeStatus, { phase: "codex_retry", attempt: 2 });
+    assert.deepEqual(stored.runtimeStatus, { phase: "codex_busy" });
     assert.equal(stored.tools[0].status, "running");
     assert.ok(stored.lastProgressAt);
     return "Done";

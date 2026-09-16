@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Codex, type Thread, type ThreadOptions } from "@openai/codex-sdk";
+import { Codex, type ThreadOptions } from "@openai/codex-sdk";
 import type { Model, Progress } from "./contracts.js";
 export type Env = Readonly<Record<string, string | undefined>>;
 export async function readJSON<T>(file: string): Promise<T | undefined> {
@@ -20,8 +20,6 @@ export function agentEnvironment(root: string, env: Env): Record<string, string>
   const result: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
     HOME: path.join(root, ".agent-api", "home"),
-    XDG_DATA_HOME: path.join(root, ".agent-api", "data"),
-    XDG_CONFIG_HOME: path.join(root, ".agent-api", "config"),
     GIT_TERMINAL_PROMPT: "0",
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
@@ -132,49 +130,43 @@ export async function checkout(root: string, repo: string, id: string, env: Reco
 export interface AgentDiagnostic {
   code: "codex_failed" | "turn_cancelled";
   phase: string;
-  stderrHints: string[];
-  reason?: "model_not_found" | "provider_auth" | "provider_api" | "incomplete_stream";
-  statusCode?: number;
+  reason?: "model_not_found" | "authentication_failed" | "rate_limited" | "quota_exceeded" | "incomplete_stream";
 }
 export class AgentError extends Error {
   constructor(readonly diagnostic: AgentDiagnostic) { super("Codex failed; see diagnostic"); }
 }
-export function providerDiagnostic(error: unknown): Pick<AgentDiagnostic, "reason" | "statusCode"> {
+export function codexFailureReason(error: unknown): AgentDiagnostic["reason"] {
   // Classify locally; never retain raw SDK errors, which may contain stderr or prompts.
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  if (/model.*(?:not found|does not exist|not supported|unavailable)/i.test(message)) return { reason: "model_not_found" };
-  if (/\b401\b|\b403\b|invalid.*api.?key|authentication/i.test(message)) return { reason: "provider_auth" };
-  if (/\b429\b|rate.?limit/i.test(message)) return { reason: "provider_api", statusCode: 429 };
-  if (/insufficient_quota|insufficient.*credits/i.test(message)) return { reason: "provider_api", statusCode: 402 };
-  return {};
+  if (/model.*(?:not found|does not exist|not supported|unavailable)/i.test(message)) return "model_not_found";
+  if (/\b401\b|\b403\b|invalid.*api.?key|authentication/i.test(message)) return "authentication_failed";
+  if (/insufficient_quota|insufficient.*credits/i.test(message)) return "quota_exceeded";
+  if (/\b429\b|rate.?limit/i.test(message)) return "rate_limited";
+  return undefined;
 }
 export function agentFailureMessage(diagnostic: AgentDiagnostic): string {
   if (diagnostic.reason === "model_not_found") return "The selected Codex model is unavailable. Start a new session with a model ID available to your OpenAI account.";
-  if (diagnostic.reason === "provider_auth") return "OpenAI authentication or access failed. Check the deployed CODEX_API_KEY and model permissions.";
-  if (diagnostic.statusCode === 402) return "OpenAI reported insufficient quota. Check account billing and spending limits.";
-  if (diagnostic.statusCode === 429) return "OpenAI rate-limited the request. Wait before retrying.";
+  if (diagnostic.reason === "authentication_failed") return "OpenAI authentication or access failed. Check the deployed CODEX_API_KEY and model permissions.";
+  if (diagnostic.reason === "quota_exceeded") return "OpenAI reported insufficient quota. Check account billing and spending limits.";
+  if (diagnostic.reason === "rate_limited") return "OpenAI rate-limited the request. Wait before retrying.";
   return "Codex failed. Inspect the workspace, credentials and session state before retrying. External side effects may have occurred.";
 }
 
-type Engine = {
-  startThread(options?: ThreadOptions): Pick<Thread, "runStreamed">;
-  resumeThread(id: string, options?: ThreadOptions): Pick<Thread, "runStreamed">;
-};
 export async function runAgent(options: {
-  root: string; directory: string; env: Record<string, string>; model: Model;
+  directory: string; env: Record<string, string>; model: Model;
   onProgress?: (event: Progress) => Promise<void>;
   prompt: string; id?: string; signal: AbortSignal; onCreated: (id: string) => Promise<void>;
-}, engine?: Engine): Promise<string> {
+}): Promise<string> {
   let phase = "startup";
   try {
     options.signal.throwIfAborted();
     for (const name of ["HOME", "CODEX_HOME"]) await mkdir(options.env[name]!, { recursive: true });
-    const codex = engine ?? new Codex({ apiKey: options.env.CODEX_API_KEY,
+    const codex = new Codex({ apiKey: options.env.CODEX_API_KEY,
       codexPathOverride: process.env.CODEX_BINARY || "codex", env: options.env });
     const settings: ThreadOptions = {
       model: options.model, workingDirectory: options.directory,
       // Cantelop is the outer sandbox. Git commit/push must work without interactive approvals.
-      sandboxMode: "danger-full-access", approvalPolicy: "never", networkAccessEnabled: true,
+      sandboxMode: "danger-full-access", approvalPolicy: "never",
     };
     const thread = options.id ? codex.resumeThread(options.id, settings) : codex.startThread(settings);
     phase = "prompt";
@@ -195,10 +187,10 @@ export async function runAgent(options: {
       for (const update of progress.accept(event)) await options.onProgress?.(update);
     }
     options.signal.throwIfAborted();
-    if (!completed) throw new AgentError({ code: "codex_failed", phase, stderrHints: [], reason: "incomplete_stream" });
+    if (!completed) throw new AgentError({ code: "codex_failed", phase, reason: "incomplete_stream" });
     return response;
   } catch (error) {
-    throw new AgentError({ code: options.signal.aborted ? "turn_cancelled" : "codex_failed", phase, stderrHints: [],
-      ...(error instanceof AgentError ? { reason: error.diagnostic.reason, statusCode: error.diagnostic.statusCode } : providerDiagnostic(error)) });
+    throw new AgentError({ code: options.signal.aborted ? "turn_cancelled" : "codex_failed", phase,
+      reason: error instanceof AgentError ? error.diagnostic.reason : codexFailureReason(error) });
   }
 }

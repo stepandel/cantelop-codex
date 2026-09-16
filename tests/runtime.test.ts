@@ -62,7 +62,7 @@ process.stdin.on('end', () => {
 `, { mode: 0o700 });
     const controller = new AbortController();
     let created = false;
-    const options = { root, directory: root, env: { PATH: process.env.PATH!, HOME: root, CODEX_HOME: path.join(root, "codex-home"), CODEX_API_KEY: "test-key" },
+    const options = { directory: root, env: { PATH: process.env.PATH!, HOME: root, CODEX_HOME: path.join(root, "codex-home"), CODEX_API_KEY: "test-key" },
       model: "chosen-model", prompt: "private-prompt", signal: controller.signal,
       onCreated: async (id: string) => { assert.equal(id, "codex-thread"); created = true; if (scenario === "cancel") controller.abort(); },
     };
@@ -79,7 +79,7 @@ process.stdin.on('end', () => {
       await assert.rejects(runAgent(options), error => {
         assert.ok(error instanceof AgentError);
         assert.equal(error.diagnostic.code, scenario === "cancel" ? "turn_cancelled" : "codex_failed");
-        if (scenario === "failure") assert.equal(error.diagnostic.reason, "provider_auth");
+        if (scenario === "failure") assert.equal(error.diagnostic.reason, "authentication_failed");
         if (scenario === "incomplete") assert.equal(error.diagnostic.reason, "incomplete_stream");
         assert.doesNotMatch(JSON.stringify(error), /private-prompt|secret-token/);
         return true;
@@ -88,3 +88,20 @@ process.stdin.on('end', () => {
     assert.equal(created, true);
   });
 }
+
+test("Codex diagnostics classify SDK errors without retaining private text or inventing HTTP codes", async () => {
+  const { codexFailureReason, agentFailureMessage } = await import("../src/runtime.js");
+  for (const [message, expected] of [
+    ["model chosen does not exist: private details", "model_not_found"],
+    ["401 private credential", "authentication_failed"],
+    ["429 rate limit exceeded", "rate_limited"],
+    ["429 insufficient_quota: private account details", "quota_exceeded"],
+    ["unknown failure with private content", undefined],
+  ] as const) {
+    const reason = codexFailureReason(new Error(message));
+    assert.equal(reason, expected);
+    const diagnostic = { code: "codex_failed" as const, phase: "prompt", reason };
+    assert.doesNotMatch(JSON.stringify(diagnostic), /private|statusCode|stderrHints/);
+    assert.doesNotMatch(agentFailureMessage(diagnostic), /private/);
+  }
+});

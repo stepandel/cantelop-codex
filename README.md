@@ -6,7 +6,7 @@ queued follow-ups, steering, cancellation, and optional API-readable session sta
 
 Adapted from [cantelop-agents-api-example](https://github.com/stepandel/cantelop-agents-api-example)
 at commit `363673b0a76cec9fdda1adf4c8f57e49c6641e61`. The API, console and scheduling
-follow that example; Codex and an OpenAI API key replace OpenCode and OpenRouter.
+follow that example, with Codex as the runtime and an OpenAI API key for model access.
 The pinned Codex TypeScript SDK and CLI are both `0.146.1`.
 
 ## Local setup

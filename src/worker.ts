@@ -109,7 +109,7 @@ async function handleCommand(root: string, command: Exclude<Command, { type: "re
     const directory = await deps.checkout(root, spec.repository, spec.sessionId, agentEnv, signal);
     phase = "agent_starting";
     await emit(event("status", { phase: "agent_starting" }, spec.sessionId));
-    stored.response = await deps.runAgent({ root, directory, env: agentEnv, model: stored.model, prompt: spec.prompt, id: stored.codexThreadId, signal,
+    stored.response = await deps.runAgent({ directory, env: agentEnv, model: stored.model, prompt: spec.prompt, id: stored.codexThreadId, signal,
       onProgress: async (progress: Progress) => {
         phase = "agent_progress";
         if (progress.type === "tool.status") {
