@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.cantelop/
+.codex/
+.codex-host/
+dist/
+.DS_Store

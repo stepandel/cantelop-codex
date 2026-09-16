@@ -1,0 +1,11 @@
+{
+  "app": "cantelop-codex",
+  "api": "src/api.ts",
+  "session": { "entrypoint": "src/session.ts", "dockerfile": "docker/Dockerfile" },
+  "environment": {
+    "API_TOKEN": { "secret": true, "required": true },
+    "CODEX_API_KEY": { "secret": true, "required": true },
+    "CODEX_MODEL": {},
+    "WORKSPACE_SLUG": { "default": "codex" }
+  }
+}
